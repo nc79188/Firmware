@@ -83,7 +83,6 @@ static constexpr FailureType failure_types[] = {
 	{ "intermittent", vehicle_command_s::FAILURE_TYPE_INTERMITTENT},
 };
 
-
 static void print_usage()
 {
 	PRINT_MODULE_DESCRIPTION(
@@ -116,8 +115,7 @@ failure gps off
 	}
 }
 
-
-int inject_failure(uint8_t unit, uint8_t type)
+int inject_failure(uint8_t unit, uint8_t type, uint8_t instance)
 {
 	const hrt_abstime now = hrt_absolute_time();
 
@@ -129,22 +127,27 @@ int inject_failure(uint8_t unit, uint8_t type)
 	command.command = vehicle_command_s::VEHICLE_CMD_INJECT_FAILURE;
 	command.param1 = static_cast<float>(unit);
 	command.param2 = static_cast<float>(type);
+	command.param3 = static_cast<float>(instance);
 	command_pub.publish(command);
 
 	vehicle_command_ack_s ack;
+
 	while (hrt_elapsed_time(&now) < 1_s) {
 		if (command_ack_sub.update(&ack)) {
 			if (ack.command == command.command) {
 				if (ack.result != vehicle_command_ack_s::VEHICLE_RESULT_ACCEPTED) {
 					PX4_ERR("Result: %d", ack.result);
 					return 1;
+
 				} else {
 					return 0;
 				}
 			}
 		}
+
 		px4_usleep(10000);
 	}
+
 	PX4_ERR("Timeout waiting for ack");
 	return 1;
 }
@@ -163,6 +166,7 @@ extern "C" __EXPORT int failure_main(int argc, char *argv[])
 	}
 
 	int32_t param = 0;
+
 	if (PX4_OK != param_get(param_find("SYS_FAILURE_EN"), &param)) {
 		PX4_ERR("Could not get param SYS_FAILURE_EN");
 		return 1;
@@ -176,6 +180,11 @@ extern "C" __EXPORT int failure_main(int argc, char *argv[])
 	const char *requested_failure_unit = argv[1];
 	const char *requested_failure_type = argv[2];
 
+	int instance = 0;
+
+	if (argc >= 4) {
+		instance = atoi(argv[3]);
+	}
 
 	for (const auto &failure_unit : failure_units) {
 		if (strncmp(failure_unit.key, requested_failure_unit, sizeof(failure_unit.key)) != 0) {
@@ -187,12 +196,13 @@ extern "C" __EXPORT int failure_main(int argc, char *argv[])
 				continue;
 			}
 
-			return inject_failure(failure_unit.value, failure_type.value);
+			return inject_failure(failure_unit.value, failure_type.value, instance);
 		}
 
 		PX4_ERR("Failure type '%s' not found", requested_failure_type);
 		return 1;
 	}
+
 	PX4_ERR("Component '%s' not found", requested_failure_unit);
 	return 1;
 }
